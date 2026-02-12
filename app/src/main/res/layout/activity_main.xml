@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+             android:layout_width="match_parent"
+             android:layout_height="match_parent"
+             android:background="#000000">
+
+    <com.yukon.litewebtv.NoImeWebView
+            android:id="@+id/main_webview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:focusable="true"
+            android:focusableInTouchMode="true" />
+
+    <TextView
+            android:id="@+id/tv_current_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:layout_marginTop="40dp"
+            android:background="@drawable/bg_title_tip"
+            android:paddingHorizontal="32dp"
+            android:paddingVertical="16dp"
+            android:text="正在播放"
+            android:textColor="#FFFFFF"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:visibility="gone"
+            android:elevation="10dp"/>
+
+    <FrameLayout
+            android:id="@+id/container_channel"
+            android:layout_width="300dp"
+            android:layout_height="match_parent"
+            android:layout_gravity="start"
+            android:background="#E6000000"
+            android:visibility="gone"
+            android:padding="16dp"
+            android:elevation="20dp">
+
+        <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="频道列表"
+                android:textColor="#FFFFFF"
+                android:textSize="24sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="16dp"/>
+
+        <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rv_channels"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_marginTop="50dp"/>
+    </FrameLayout>
+
+    <FrameLayout
+            android:id="@+id/container_program"
+            android:layout_width="300dp"
+            android:layout_height="match_parent"
+            android:layout_gravity="end"
+            android:background="#E6000000"
+            android:visibility="gone"
+            android:padding="16dp"
+            android:elevation="20dp">
+
+        <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="节目单"
+                android:textColor="#FFFFFF"
+                android:textSize="24sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="16dp"/>
+
+        <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rv_programs"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_marginTop="50dp"/>
+    </FrameLayout>
+
+    <FrameLayout
+            android:id="@+id/fl_splash_cover"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="visible"
+            android:elevation="100dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="#000000">
+
+        <View
+                android:id="@+id/view_breathing_light"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@drawable/bg_breathing_light"
+                android:alpha="0.8"/>
+
+        <View
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@drawable/bg_frosted_overlay"/>
+
+        <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:gravity="center"
+                android:orientation="vertical">
+
+            <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="LiteWebTV"
+                    android:textColor="#FFFFFF"
+                    android:textSize="48sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.1"
+                    android:shadowColor="#80000000"
+                    android:shadowDx="2"
+                    android:shadowDy="2"
+                    android:shadowRadius="10"/>
+
+            <View
+                    android:layout_width="60dp"
+                    android:layout_height="2dp"
+                    android:layout_marginVertical="20dp"
+                    android:background="#FF00A1D6"/>
+
+            <TextView
+                    android:id="@+id/tv_splash_status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="正在初始化系统资源..."
+                    android:textColor="#DDDDDD"
+                    android:textSize="18sp"
+                    android:shadowColor="#80000000"
+                    android:shadowDx="1"
+                    android:shadowDy="1"
+                    android:shadowRadius="5"/>
+
+            <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="24dp"
+                    android:orientation="horizontal"
+                    android:gravity="center">
+
+                <View
+                        android:id="@+id/view_loading_dot_1"
+                        android:layout_width="10dp"
+                        android:layout_height="10dp"
+                        android:background="@drawable/shape_loading_dot"
+                        android:alpha="0.3"/>
+
+                <View
+                        android:id="@+id/view_loading_dot_2"
+                        android:layout_width="10dp"
+                        android:layout_height="10dp"
+                        android:layout_marginStart="16dp"
+                        android:background="@drawable/shape_loading_dot"
+                        android:alpha="0.3"/>
+
+                <View
+                        android:id="@+id/view_loading_dot_3"
+                        android:layout_width="10dp"
+                        android:layout_height="10dp"
+                        android:layout_marginStart="16dp"
+                        android:background="@drawable/shape_loading_dot"
+                        android:alpha="0.3"/>
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|center_horizontal"
+                android:layout_marginBottom="40dp"
+                android:gravity="center"
+                android:orientation="vertical">
+
+            <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="！开源共享，禁止买卖！"
+                    android:textColor="#FF5252"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="8dp"
+                    android:shadowColor="#80000000"
+                    android:shadowDx="1"
+                    android:shadowDy="1"
+                    android:shadowRadius="3"/>
+
+            <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="https://github.com/YukonKong/LiteWebTV"
+                    android:textColor="#BBBBBB"
+                    android:textSize="14sp"
+                    android:layout_marginBottom="4dp"/>
+
+            <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="https://gitee.com/YukonKong/LiteWebTV"
+                    android:textColor="#BBBBBB"
+                    android:textSize="14sp"/>
+
+        </LinearLayout>
+
+    </FrameLayout>
+
+</FrameLayout>

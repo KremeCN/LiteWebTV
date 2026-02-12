@@ -1,0 +1,57 @@
+# ---------------------
+# Android / Gradle 构建产物
+# ---------------------
+# 忽略所有模块的 build 文件夹
+build/
+**/build/
+
+# 忽略 Gradle 缓存和包装器生成的临时文件
+.gradle/
+gradle-app.setting
+!gradle-wrapper.jar
+
+# ---------------------
+# 本地环境配置 (绝对不能提交)
+# ---------------------
+# 包含 SDK 路径和本地密钥路径，每个人的电脑都不一样
+local.properties
+
+# ---------------------
+# IDE (Android Studio / IntelliJ) 配置文件
+# ---------------------
+# 忽略整个 .idea 文件夹是较激进但省心的做法
+# 如果你想保留代码风格配置，可以只忽略 workspace.xml 等文件
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# ---------------------
+# Kotlin / 临时文件
+# ---------------------
+.kotlin/
+.kotlin_module
+
+# ---------------------
+# Android 调试与性能监控文件
+# ---------------------
+captures/
+*.hprof
+*.keystore
+*.jks
+
+# ---------------------
+# 操作系统生成的文件
+# ---------------------
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# macOS (如果有队友用 Mac)
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
