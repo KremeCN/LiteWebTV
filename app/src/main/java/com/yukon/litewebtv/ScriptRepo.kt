@@ -4,36 +4,27 @@ object ScriptRepo {
 
     /**
      * 核心自动化脚本合集
-     * 更新日志：
-     * 1. [修复] 频道过滤逻辑：同时剔除 "VIP" 和 "限免" 频道
-     * 2. [新增] 视频播放状态监测 -> 触发智能幕布
+     * 架构：任务注册式 MutationObserver + requestAnimationFrame 节流
+     *
+     * 性能对比（vs 旧版6个 setInterval）：
+     * - 旧版：6个独立计时器 ≈ 15次回调/秒，持续运行
+     * - 新版：1个 MutationObserver，DOM 变化时才触发，rAF 合并为每帧最多1次
+     *         任务完成即移除，全部完成后 Observer 自动断开
+     *         视频监测改用原生事件，零持续 CPU 开销
      */
     val AUTOMATION_SCRIPT = """
         (function() {
-            
+            'use strict';
+
             // 【防御模块】强制禁用页面上所有输入框
             function disableAllInputs() {
                 const inputs = document.querySelectorAll('input, textarea, [contenteditable="true"]');
                 inputs.forEach(el => {
                     el.setAttribute('disabled', 'true');
                     el.setAttribute('readonly', 'true');
-                    el.blur(); 
+                    el.blur();
                 });
             }
-
-            // 【智能幕布触发源】持续监测视频是否真的开始播放了
-            setInterval(() => {
-                const video = document.querySelector('video');
-                if (video) {
-                    // readyState: 4=HAVE_ENOUGH_DATA
-                    // currentTime > 0.1 确保视频已经走了一点点
-                    if (!video.paused && video.readyState >= 3 && video.currentTime > 0.1) {
-                        if (window.Android && window.Android.dismissSplash) {
-                            window.Android.dismissSplash();
-                        }
-                    }
-                }
-            }, 500);
 
             // 定义向 Android 发送数据的函数
             function sendDataToAndroid() {
@@ -45,12 +36,11 @@ object ScriptRepo {
                     let channelList = [];
                     channelItems.forEach((item, index) => {
                         const span = item.querySelector('span');
-                        let name = "未知频道";
-                        let isRestricted = false; // 是否受限（VIP或限免）
-                        
+                        let isRestricted = false;
+
                         if (span) {
                             const tag = span.querySelector('.tv-main-con-r-list-left-tag');
-                            
+
                             // 【核心修复】同时检测 VIP 和 限免
                             if (tag) {
                                 const tagText = tag.textContent;
@@ -58,15 +48,15 @@ object ScriptRepo {
                                     isRestricted = true;
                                 }
                             }
-                            
+
                             // 只有完全无限制的频道才加入列表
                             if (!isRestricted) {
                                 let fullText = span.textContent;
                                 if (tag) fullText = fullText.replace(tag.textContent, '');
-                                name = fullText.trim();
-                                
+                                const name = fullText.trim();
+
                                 channelList.push({
-                                    index: index, // 这里的 index 是网页 DOM 的原始索引，点击必须用这个
+                                    index: index,
                                     name: name,
                                     isActive: item.classList.contains('tvSelect')
                                 });
@@ -108,99 +98,234 @@ object ScriptRepo {
                 }
             }
 
+            // =========================================================
+            // 数据变更监听器（永久运行）
+            // 当网站更新节目单/频道列表/标题时自动重推数据到 Android
+            // 作用域限定在3个容器节点上，不监听全局 DOM
+            // =========================================================
+            let _dataDebounce = null;
+            function watchForDataUpdates() {
+                const targets = [
+                    document.querySelector('.tv-zhan-list-b-r'),
+                    document.querySelector('.tv-zhan-title'),
+                    document.querySelector('.tv-main-con-r-list-left')
+                ].filter(Boolean);
+
+                if (targets.length === 0) return false;
+
+                const dataObserver = new MutationObserver(() => {
+                    if (_dataDebounce) clearTimeout(_dataDebounce);
+                    _dataDebounce = setTimeout(() => {
+                        sendDataToAndroid();
+                    }, 300);
+                });
+
+                targets.forEach(el => {
+                    dataObserver.observe(el, {
+                        childList: true,
+                        subtree: true,
+                        characterData: true
+                    });
+                });
+
+                return true;
+            }
+
+            // 辅助：模拟鼠标移动唤出播放器控制条
+            function revealControls() {
+                const c = document.querySelector('.container');
+                if (c) c.dispatchEvent(new MouseEvent('mousemove', {bubbles: true}));
+            }
+
+            // =========================================================
+            // 核心引擎: 任务注册式 MutationObserver
+            // - 每个任务是一个函数，返回 true 表示完成并永久移除
+            // - 所有任务完成后 Observer 自动 disconnect，零开销
+            // - requestAnimationFrame 合并同一帧内的多次 DOM 变更
+            // =========================================================
+            const _tasks = new Map();
+            let _observer = null;
+            let _rafId = null;
+
+            function addTask(id, fn) {
+                _tasks.set(id, fn);
+                if (!_observer) _startObserver();
+                _scheduleRun();
+            }
+
+            function _scheduleRun() {
+                if (_rafId !== null) return;
+                _rafId = requestAnimationFrame(() => {
+                    _rafId = null;
+                    for (const [id, fn] of _tasks) {
+                        try { if (fn()) _tasks.delete(id); } catch(e) {}
+                    }
+                    if (_tasks.size === 0 && _observer) {
+                        _observer.disconnect();
+                        _observer = null;
+                    }
+                });
+            }
+
+            function _startObserver() {
+                _observer = new MutationObserver(_scheduleRun);
+                _observer.observe(document.documentElement, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    attributeFilter: ['style', 'class']
+                });
+            }
+
             // ==========================================
             // 1. 网页加载监测器
             // ==========================================
-            const checkTimer = setInterval(() => {
-                const playerContainer = document.querySelector('.container');
-                if (playerContainer) {
-                    playerContainer.dispatchEvent(new MouseEvent('mousemove', {bubbles: true}));
-                }
+            addTask('pageLoad', () => {
                 disableAllInputs();
+                revealControls();
 
-                const hasPlayer = document.querySelector('#vodbox2024078201') || document.querySelector('.c-container') || document.querySelector('.video-con');
+                const hasPlayer = !!(document.querySelector('#vodbox2024078201') || document.querySelector('.c-container') || document.querySelector('.video-con'));
                 const hasChannelList = document.querySelectorAll('.tv-main-con-r-list-left .oveerflow-1').length > 0;
                 const hasProgramList = document.querySelectorAll('.tv-zhan-list-b-r .tv-zhan-list-b-r-item').length > 0;
                 const titleEl = document.querySelector('.tv-zhan-title');
                 const hasTitle = titleEl && titleEl.textContent.trim().length > 0;
 
                 if (hasPlayer && hasChannelList && hasProgramList && hasTitle) {
-                    clearInterval(checkTimer);
                     sendDataToAndroid();
+                    return true;
                 }
-            }, 200);
+                return false;
+            });
 
             // ==========================================
             // 2. 画质 (自动选 1080P)
             // ==========================================
-            const qualityIntervalId = setInterval(() => {
-                document.querySelector('.container')?.dispatchEvent(new MouseEvent('mousemove', {bubbles: true}));
-                const targetQuality = "1080P";
+            addTask('quality', () => {
+                revealControls();
                 const qualityItems = document.querySelectorAll('.bei-list-inner .item');
-                if (qualityItems.length > 0) {
-                    for (const item of qualityItems) {
-                        const text = item.textContent.trim();
-                        if (text.includes(targetQuality)) {
-                            if (!item.classList.contains('active')) {
-                                item.click();
-                            }
-                            clearInterval(qualityIntervalId);
-                            break;
-                        }
+                if (qualityItems.length === 0) return false;
+                for (const item of qualityItems) {
+                    if (item.textContent.trim().includes('1080P')) {
+                        if (!item.classList.contains('active')) item.click();
+                        return true;
                     }
                 }
-            }, 500);
+                return false;
+            });
 
             // ==========================================
             // 3. 声音 (自动取消静音)
             // ==========================================
-            const soundIntervalId = setInterval(() => {
-                document.querySelector('.container')?.dispatchEvent(new MouseEvent('mousemove', {bubbles: true}));
+            addTask('unmute', () => {
+                revealControls();
                 const muteBtn = document.querySelector('.voice.off');
-                if (muteBtn) {
-                    if (window.getComputedStyle(muteBtn).display !== 'none') {
-                        muteBtn.click();
-                        clearInterval(soundIntervalId);
-                    } else {
-                        clearInterval(soundIntervalId);
-                    }
-                }
-            }, 500);
+                if (!muteBtn) return false;
+                if (window.getComputedStyle(muteBtn).display !== 'none') muteBtn.click();
+                return true;
+            });
 
             // ==========================================
             // 4. 全屏 (强制样式覆盖)
             // ==========================================
-            const fsIntervalId = setInterval(() => {
-                const playerContainer = document.querySelector('#vodbox2024078201') || document.querySelector('.c-container') || document.querySelector('.video-con');
-                if (playerContainer) {
-                    if (playerContainer.style.position === 'fixed') {
-                         if(playerContainer.style.zIndex !== '99999') playerContainer.style.setProperty('z-index', '99999', 'important');
-                         clearInterval(fsIntervalId);
-                         return;
-                    }
-                    playerContainer.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; z-index: 99999 !important; background-color: black !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important;';
-                    const videoTag = playerContainer.querySelector('video');
-                    if (videoTag) videoTag.style.cssText = 'width: 100% !important; height: 100% !important; object-fit: contain !important;';
-                    const sideBar = document.querySelector('.tv-main-con-r');
-                    if (sideBar) sideBar.style.display = 'none';
+            addTask('fullscreen', () => {
+                const pc = document.querySelector('#vodbox2024078201') || document.querySelector('.c-container') || document.querySelector('.video-con');
+                if (!pc) return false;
+                if (pc.style.position === 'fixed') {
+                    if (pc.style.zIndex !== '99999') pc.style.setProperty('z-index', '99999', 'important');
+                    return true;
                 }
-            }, 500);
+                pc.style.cssText = 'position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; z-index: 99999 !important; background-color: black !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important;';
+                const videoTag = pc.querySelector('video');
+                if (videoTag) videoTag.style.cssText = 'width: 100% !important; height: 100% !important; object-fit: contain !important;';
+                const sideBar = document.querySelector('.tv-main-con-r');
+                if (sideBar) sideBar.style.display = 'none';
+                return true;
+            });
 
             // ==========================================
             // 5. 播放 (自动点击播放按钮)
             // ==========================================
-            const playIntervalId = setInterval(() => {
-                document.querySelector('.container')?.dispatchEvent(new MouseEvent('mousemove', {bubbles: true}));
-                const startPlayBtn = document.querySelector('.y-full-control-btnl .play.play1');
+            addTask('autoPlay', () => {
+                revealControls();
+                const startBtn = document.querySelector('.y-full-control-btnl .play.play1');
                 const playingBtn = document.querySelector('.y-full-control-btnl .play.play2');
-                if (startPlayBtn && window.getComputedStyle(startPlayBtn).display !== 'none') {
-                        startPlayBtn.click();
-                        clearInterval(playIntervalId);
-                } else if (playingBtn && window.getComputedStyle(playingBtn).display !== 'none') {
-                        clearInterval(playIntervalId);
+                if (startBtn && window.getComputedStyle(startBtn).display !== 'none') {
+                    startBtn.click();
+                    return true;
                 }
-            }, 500);
-            
+                if (playingBtn && window.getComputedStyle(playingBtn).display !== 'none') {
+                    return true;
+                }
+                return false;
+            });
+
+            // ==========================================
+            // 6. 视频播放监测 → 智能幕布触发
+            //    纯事件驱动，替代原 500ms 持续轮询
+            // ==========================================
+            addTask('videoMonitor', () => {
+                const video = document.querySelector('video');
+                if (!video) return false;
+
+                let dismissed = false;
+                let tuListening = false;
+
+                function tryDismiss() {
+                    if (dismissed) return;
+                    if (!video.paused && video.readyState >= 3 && video.currentTime > 0.1) {
+                        if (window.Android && window.Android.dismissSplash) {
+                            window.Android.dismissSplash();
+                            dismissed = true;
+                            stopTimeUpdate();
+                        }
+                    }
+                }
+
+                function onTimeUpdate() {
+                    tryDismiss();
+                }
+
+                function startTimeUpdate() {
+                    if (!tuListening) {
+                        video.addEventListener('timeupdate', onTimeUpdate);
+                        tuListening = true;
+                    }
+                }
+
+                function stopTimeUpdate() {
+                    if (tuListening) {
+                        video.removeEventListener('timeupdate', onTimeUpdate);
+                        tuListening = false;
+                    }
+                }
+
+                // playing 事件：视频开始播放时触发
+                video.addEventListener('playing', () => {
+                    tryDismiss();
+                    if (!dismissed) startTimeUpdate();
+                });
+
+                // loadstart 事件：换台加载新源时重置状态
+                video.addEventListener('loadstart', () => {
+                    dismissed = false;
+                    startTimeUpdate();
+                });
+
+                // 立即检查当前状态
+                tryDismiss();
+                if (!dismissed) startTimeUpdate();
+
+                return true; // 事件监听器已挂载，任务完成
+            });
+
+            // ==========================================
+            // 7. 数据变更自动同步（永久监听）
+            //    换台后网站更新节目单/标题时自动重推
+            // ==========================================
+            addTask('dataWatcher', () => {
+                return watchForDataUpdates();
+            });
+
             window.extractData = sendDataToAndroid;
 
         })();
