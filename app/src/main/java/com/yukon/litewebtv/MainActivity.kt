@@ -74,6 +74,9 @@ class MainActivity : AppCompatActivity() {
     private val TARGET_URL = "https://www.yangshipin.cn/tv/home"
     private val PC_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
+    /** 返回空响应用于拦截无用请求（每次新建 InputStream 避免复用问题） */
+    private fun EMPTY_RESPONSE() = WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -165,6 +168,10 @@ class MainActivity : AppCompatActivity() {
     // =========================================================================
 
     private fun showSplashScreen(statusText: String) {
+        // 【关键】先取消正在进行的升起动画，清除 listener 防止 onAnimationEnd 设 GONE
+        flSplashCover.animate().cancel()
+        flSplashCover.animate().setListener(null)
+
         flSplashCover.translationY = 0f
         flSplashCover.visibility = View.VISIBLE
         tvSplashStatus.text = statusText
@@ -213,7 +220,10 @@ class MainActivity : AppCompatActivity() {
             .setListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
                     super.onAnimationEnd(animation)
-                    flSplashCover.visibility = View.GONE
+                    // 仅当动画正常完成（非被 cancel）时才隐藏
+                    if (flSplashCover.translationY != 0f) {
+                        flSplashCover.visibility = View.GONE
+                    }
                 }
             })
             .start()
@@ -513,14 +523,50 @@ class MainActivity : AppCompatActivity() {
 
             override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                 val url = request?.url?.toString()?.lowercase() ?: return null
-                if (url.contains("hm.baidu.com") ||
-                    url.contains("google-analytics") ||
-                    url.contains("s.cnzz.com") ||
-                    url.contains("tongji") ||
-                    url.contains("stats")) {
-                    Log.d("LiteWebTV_Perf", "已拦截垃圾请求: $url")
-                    return WebResourceResponse("text/plain", "utf-8", 0, "OK", HashMap(), ByteArrayInputStream("".toByteArray()))
+
+                // ---- 1. 字体文件：TV 端无需 Web 字体 ----
+                if (url.endsWith(".woff") || url.endsWith(".woff2") ||
+                    url.endsWith(".ttf") || url.endsWith(".otf") ||
+                    url.endsWith(".eot") || url.contains("/fonts/")) {
+                    return EMPTY_RESPONSE()
                 }
+
+                // ---- 2. 图片资源：纯视频播放无需任何图片 ----
+                // 视频流走 blob URL 不会被匹配；控件交互靠 CSS 类名定位，不依赖图片渲染
+                if (url.endsWith(".jpg") || url.endsWith(".jpeg") ||
+                    url.endsWith(".png") || url.endsWith(".gif") ||
+                    url.endsWith(".webp") || url.endsWith(".svg") ||
+                    url.endsWith(".ico") || url.endsWith(".bmp") ||
+                    url.endsWith(".avif")) {
+                    return EMPTY_RESPONSE()
+                }
+
+                // ---- 3. 统计追踪 & 广告 & 埋点 ----
+                val blockKeywords = arrayOf(
+                    // 百度统计
+                    "hm.baidu.com", "tongji.baidu.com",
+                    // Google
+                    "google-analytics", "googletagmanager",
+                    // CNZZ / 友盟
+                    "s.cnzz.com", "umeng.com",
+                    // 通用追踪/埋点关键字
+                    "/beacon", "/trace", "/report", "/collect",
+                    "/log.", "/logs/", "/monitor", "/tracking",
+                    "/analytics", "/stat.", "/stats/", "/stats?",
+                    "/tongji", "/datacenter",
+                    // 央视频/CMG 内部埋点 & 非核心 SDK
+                    "openapi-trace", "tracing", "sentry",
+                    "bugly", "hotfix", "crash",
+                    // 广告
+                    "ad.doubleclick", "pagead", "adservice",
+                    "adsense", "adsbygoogle"
+                )
+                for (keyword in blockKeywords) {
+                    if (url.contains(keyword)) {
+                        return EMPTY_RESPONSE()
+                    }
+                }
+
                 return super.shouldInterceptRequest(view, request)
             }
         }
