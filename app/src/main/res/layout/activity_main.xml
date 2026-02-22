@@ -79,6 +79,29 @@
                 android:layout_marginTop="50dp"/>
     </FrameLayout>
 
+    <com.yukon.litewebtv.GestureOverlayView
+            android:id="@+id/gesture_overlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:elevation="15dp"
+            android:foreground="@drawable/bg_gesture_ripple"
+            android:clickable="true"
+            android:focusable="false" />
+
+    <TextView
+            android:id="@+id/tv_adjust_indicator"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:background="@drawable/bg_title_tip"
+            android:paddingHorizontal="32dp"
+            android:paddingVertical="20dp"
+            android:textColor="#FFFFFF"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:visibility="gone"
+            android:elevation="50dp" />
+
     <FrameLayout
             android:id="@+id/fl_splash_cover"
             android:layout_width="match_parent"

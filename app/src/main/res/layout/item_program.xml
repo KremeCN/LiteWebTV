@@ -5,7 +5,6 @@
               android:background="@drawable/selector_item_bg"
               android:clickable="true"
               android:focusable="true"
-              android:focusableInTouchMode="true"
               android:orientation="vertical"
               android:padding="10dp">
 

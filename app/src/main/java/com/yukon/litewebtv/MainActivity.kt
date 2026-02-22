@@ -5,8 +5,12 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
+import android.app.UiModeManager
 import android.content.Context
+import android.content.res.Configuration
+import android.media.AudioManager
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
@@ -38,6 +42,18 @@ class MainActivity : AppCompatActivity() {
     private lateinit var rvChannels: RecyclerView
     private lateinit var rvPrograms: RecyclerView
     private lateinit var tvCurrentTitle: TextView
+    private lateinit var gestureOverlay: GestureOverlayView
+    private lateinit var tvAdjustIndicator: TextView
+
+    // 音量/亮度调节
+    private lateinit var audioManager: AudioManager
+    private var currentBrightness: Float = -1f
+    private var volumeAccumulator = 0f
+    private val hideIndicatorRunnable = Runnable {
+        tvAdjustIndicator.animate().alpha(0f).setDuration(300).withEndAction {
+            tvAdjustIndicator.visibility = View.GONE
+        }.start()
+    }
 
     // 幕布相关
     private lateinit var flSplashCover: FrameLayout
@@ -82,7 +98,10 @@ class MainActivity : AppCompatActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(R.layout.activity_main)
 
+        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
         initViews()
+        initGestures()
         initWebView()
         hideSystemUI()
 
@@ -101,6 +120,7 @@ class MainActivity : AppCompatActivity() {
 
         flSplashCover = findViewById(R.id.fl_splash_cover)
         tvSplashStatus = findViewById(R.id.tv_splash_status)
+        tvAdjustIndicator = findViewById(R.id.tv_adjust_indicator)
         viewBreathingLight = findViewById(R.id.view_breathing_light)
 
         // 初始化加载点
@@ -128,6 +148,166 @@ class MainActivity : AppCompatActivity() {
         rvPrograms.layoutManager = LinearLayoutManager(this)
         programAdapter = ProgramAdapter()
         rvPrograms.adapter = programAdapter
+    }
+
+    // =========================================================================
+    // 手势触控层初始化
+    // =========================================================================
+
+    /**
+     * 初始化手势触控层
+     * TV 设备自动隐藏（使用遥控器交互），手机/平板启用手势
+     */
+    private fun initGestures() {
+        gestureOverlay = findViewById(R.id.gesture_overlay)
+
+        if (isRunningOnTv()) {
+            gestureOverlay.visibility = View.GONE
+            return
+        }
+
+        gestureOverlay.visibility = View.VISIBLE
+
+        // 注册需要穿透触摸的侧边栏容器
+        // 当侧边栏打开时，触摸在这些 View 内部的事件不会被手势层拦截
+        gestureOverlay.passthroughViews = listOf(containerChannel, containerProgram)
+
+        gestureOverlay.callback = object : GestureOverlayView.GestureCallback {
+            override fun onSwipeUp() {
+                // 上滑 = 内容上移 = 下一个频道
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastSwitchTime < SWITCH_DELAY) {
+                    showToast("高频次换台会导致播放卡顿\n等待3s方可继续换台~")
+                    return
+                }
+                lastSwitchTime = currentTime
+                quickSwitchChannel(true)
+            }
+
+            override fun onSwipeDown() {
+                // 下滑 = 内容下移 = 上一个频道
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastSwitchTime < SWITCH_DELAY) {
+                    showToast("高频次换台会导致播放卡顿\n等待3s方可继续换台~")
+                    return
+                }
+                lastSwitchTime = currentTime
+                quickSwitchChannel(false)
+            }
+
+            override fun onSwipeLeft() {
+                // 左滑 → 呼出节目单（屏幕右侧面板）
+                showProgramSidebar()
+            }
+
+            override fun onSwipeRight() {
+                // 右滑 → 呼出频道列表（屏幕左侧面板）
+                showChannelSidebar()
+            }
+
+            override fun onSingleTap() {
+                // 单击 → 关闭侧边栏（空白处单击即关闭）
+                if (isMenuVisible) {
+                    closeSidebars()
+                }
+            }
+
+            override fun onDoubleTap() {
+                // 双击 → 播放/暂停（直接操作 video API，比 .click() 可靠）
+                webView.evaluateJavascript("""
+                    (function(){
+                        var video = document.querySelector('video');
+                        if(video){
+                            if(video.paused){ video.play(); }
+                            else { video.pause(); }
+                        }
+                    })();
+                """.trimIndent(), null)
+            }
+
+            override fun onVolumeChange(deltaPercent: Float) {
+                adjustVolume(deltaPercent)
+            }
+
+            override fun onBrightnessChange(deltaPercent: Float) {
+                adjustBrightness(deltaPercent)
+            }
+
+            override fun onAdjustStart(isVolume: Boolean) {
+                volumeAccumulator = 0f
+                tvAdjustIndicator.removeCallbacks(hideIndicatorRunnable)
+                tvAdjustIndicator.alpha = 1f
+                tvAdjustIndicator.visibility = View.VISIBLE
+                if (isVolume) {
+                    val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                    val cur = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                    tvAdjustIndicator.text = "\uD83D\uDD0A ${cur * 100 / max}%"
+                } else {
+                    initBrightnessIfNeeded()
+                    tvAdjustIndicator.text = "☀ ${(currentBrightness * 100).toInt()}%"
+                }
+            }
+
+            override fun onAdjustEnd() {
+                // 松手后 1.5 秒自动隐藏
+                tvAdjustIndicator.removeCallbacks(hideIndicatorRunnable)
+                tvAdjustIndicator.postDelayed(hideIndicatorRunnable, 1500)
+            }
+        }
+    }
+
+    /**
+     * 检测当前设备是否为 Android TV
+     * 通过 UiModeManager 判断，比 hasSystemFeature 更准确
+     */
+    private fun isRunningOnTv(): Boolean {
+        val uiModeManager = getSystemService(Context.UI_MODE_SERVICE) as UiModeManager
+        return uiModeManager.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+    }
+
+    // =========================================================================
+    // 音量 & 亮度调节
+    // =========================================================================
+
+    private fun adjustVolume(deltaPercent: Float) {
+        val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        volumeAccumulator += deltaPercent * maxVolume
+
+        val steps = volumeAccumulator.toInt()
+        if (steps != 0) {
+            volumeAccumulator -= steps
+            val currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+            val newVolume = (currentVolume + steps).coerceIn(0, maxVolume)
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVolume, 0)
+        }
+
+        val currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val percent = currentVolume * 100 / maxVolume
+        tvAdjustIndicator.text = "\uD83D\uDD0A $percent%"
+    }
+
+    private fun adjustBrightness(deltaPercent: Float) {
+        initBrightnessIfNeeded()
+        currentBrightness = (currentBrightness + deltaPercent).coerceIn(0.01f, 1.0f)
+
+        val lp = window.attributes
+        lp.screenBrightness = currentBrightness
+        window.attributes = lp
+
+        tvAdjustIndicator.text = "☀ ${(currentBrightness * 100).toInt()}%"
+    }
+
+    /**
+     * 首次调节亮度时，从系统设置读取当前亮度值
+     */
+    private fun initBrightnessIfNeeded() {
+        if (currentBrightness < 0) {
+            currentBrightness = try {
+                Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS) / 255f
+            } catch (e: Exception) {
+                0.5f
+            }
+        }
     }
 
     /**
@@ -338,6 +518,7 @@ class MainActivity : AppCompatActivity() {
         containerChannel.visibility = View.VISIBLE
         containerProgram.visibility = View.GONE
         isMenuVisible = true
+        gestureOverlay.isSidebarOpen = true
 
         rvChannels.post {
             val layoutManager = rvChannels.layoutManager as LinearLayoutManager
@@ -359,6 +540,7 @@ class MainActivity : AppCompatActivity() {
         containerProgram.visibility = View.VISIBLE
         containerChannel.visibility = View.GONE
         isMenuVisible = true
+        gestureOverlay.isSidebarOpen = true
 
         rvPrograms.post {
             val layoutManager = rvPrograms.layoutManager as LinearLayoutManager
@@ -378,6 +560,7 @@ class MainActivity : AppCompatActivity() {
         containerChannel.visibility = View.GONE
         containerProgram.visibility = View.GONE
         isMenuVisible = false
+        gestureOverlay.isSidebarOpen = false
         currentFocus?.clearFocus()
         webView.requestFocus()
     }

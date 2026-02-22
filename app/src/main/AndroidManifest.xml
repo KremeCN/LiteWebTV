@@ -6,6 +6,11 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- TV 非必需，允许手机安装 -->
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <!-- 触摸屏非必需，允许 TV 安装 -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
     <application
             android:allowBackup="true"
             android:dataExtractionRules="@xml/data_extraction_rules"
@@ -26,7 +31,7 @@
                 android:name=".MainActivity"
                 android:configChanges="orientation|screenSize|keyboardHidden|navigation"
                 android:exported="true"
-                android:screenOrientation="landscape"
+                android:screenOrientation="sensorLandscape"
                 android:windowSoftInputMode="stateAlwaysHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
