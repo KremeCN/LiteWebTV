@@ -72,9 +72,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var programAdapter: ProgramAdapter
 
     private var allChannels: List<ChannelItem> = ArrayList()
+    private var allPrograms: List<ProgramItem> = ArrayList()
     private var isMenuVisible = false
     private var currentChannelIndex = 0
     private var currentProgramIndex = 0
+    private var currentProgramTitle: String = ""
 
     private var lastSwitchTime: Long = 0
     private val SWITCH_DELAY = 3000L
@@ -87,14 +89,31 @@ class MainActivity : AppCompatActivity() {
         tvCurrentTitle.visibility = View.GONE
     }
 
+    private val scheduleTickRunnable = object : Runnable {
+        override fun run() {
+            refreshProgramHighlight(null)
+            rvPrograms.postDelayed(this, 30_000)
+        }
+    }
+
     private val TARGET_URL = "https://www.yangshipin.cn/tv/home"
     private val PC_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
     /** 返回空响应用于拦截无用请求（每次新建 InputStream 避免复用问题） */
     private fun EMPTY_RESPONSE() = WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
 
+    companion object {
+        // 缓存在覆写前的真实本地时区（用于界面的双时区显示换算）
+        val realLocalTimeZone: java.util.TimeZone = java.util.TimeZone.getDefault()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // 强制全应用（含 WebView JS 引擎）使用北京时间 (UTC+8)
+        // 解决非东八区用户访问央视网页时，节目单匹配错乱的问题
+        java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Asia/Shanghai"))
+        
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(R.layout.activity_main)
 
@@ -107,6 +126,8 @@ class MainActivity : AppCompatActivity() {
 
         // 启动圆点动画
         startLoadingDotsAnimation()
+        // 启动节目单高亮定时校准
+        startScheduleTicker()
         // 启动时显示幕布
         showSplashScreen("正在连接云端服务器...")
     }
@@ -664,17 +685,70 @@ class MainActivity : AppCompatActivity() {
     }
 
     fun updateProgramList(list: List<ProgramItem>) {
-        programAdapter.updateData(list)
-        val activeIndex = list.indexOfFirst { it.isCurrent }
-        if (activeIndex != -1) {
-            currentProgramIndex = activeIndex
-        } else {
+        refreshProgramHighlight(list)
+    }
+
+    fun onJsTitleReceived(jsTitle: String) {
+        val stableTitle = if (currentProgramTitle.isNotBlank()) currentProgramTitle else jsTitle
+        showTitleTip(stableTitle)
+    }
+
+    private fun startScheduleTicker() {
+        rvPrograms.removeCallbacks(scheduleTickRunnable)
+        rvPrograms.post(scheduleTickRunnable)
+    }
+
+    private fun refreshProgramHighlight(incoming: List<ProgramItem>?) {
+        val source = incoming ?: allPrograms
+        if (source.isEmpty()) {
+            allPrograms = emptyList()
             currentProgramIndex = 0
+            programAdapter.updateData(emptyList())
+            return
+        }
+
+        val nowMinutes = currentBeijingMinutes()
+        val activeIndex = activeProgramIndex(source, nowMinutes) ?: (source.size - 1).coerceAtLeast(0)
+
+        val normalized = source.mapIndexed { index, item ->
+            item.copy(isCurrent = index == activeIndex)
+        }
+
+        allPrograms = normalized
+        currentProgramIndex = activeIndex
+        programAdapter.updateData(normalized)
+
+        val nextTitle = normalized[activeIndex].title
+        if (nextTitle != currentProgramTitle) {
+            currentProgramTitle = nextTitle
+            showTitleTip(nextTitle)
         }
     }
 
-    // =========================================================================
-    // WebView 配置
+    private fun currentBeijingMinutes(): Int {
+        val calendar = java.util.Calendar.getInstance(java.util.TimeZone.getTimeZone("Asia/Shanghai"))
+        return calendar.get(java.util.Calendar.HOUR_OF_DAY) * 60 + calendar.get(java.util.Calendar.MINUTE)
+    }
+
+    private fun activeProgramIndex(list: List<ProgramItem>, nowMinutes: Int): Int? {
+        var lastIndex: Int? = null
+        list.forEachIndexed { index, item ->
+            val minutes = parseTimeToMinutes(item.time) ?: return@forEachIndexed
+            if (minutes <= nowMinutes) {
+                lastIndex = index
+            }
+        }
+        return lastIndex
+    }
+
+    private fun parseTimeToMinutes(text: String): Int? {
+        val parts = text.split(":")
+        if (parts.size != 2) return null
+        val h = parts[0].toIntOrNull() ?: return null
+        val m = parts[1].toIntOrNull() ?: return null
+        if (h !in 0..23 || m !in 0..59) return null
+        return h * 60 + m
+    }
     // =========================================================================
     @SuppressLint("SetJavaScriptEnabled")
     private fun initWebView() {
@@ -785,6 +859,9 @@ class MainActivity : AppCompatActivity() {
             breathingAnimator.cancel()
         }
 
+        rvPrograms.removeCallbacks(scheduleTickRunnable)
+        tvCurrentTitle.removeCallbacks(hideTitleRunnable)
+
         webView.loadDataWithBaseURL(null, "", "text/html", "utf-8", null)
         webView.clearHistory()
         (webView.parent as? android.view.ViewGroup)?.removeView(webView)
@@ -792,3 +869,4 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 }
+

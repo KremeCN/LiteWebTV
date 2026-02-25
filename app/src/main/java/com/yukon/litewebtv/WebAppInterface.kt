@@ -58,7 +58,7 @@ class WebAppInterface(private val context: Context) {
     fun receiveTitle(title: String) {
         if (context is MainActivity) {
             context.runOnUiThread {
-                context.showTitleTip(title)
+                context.onJsTitleReceived(title)
             }
         }
     }

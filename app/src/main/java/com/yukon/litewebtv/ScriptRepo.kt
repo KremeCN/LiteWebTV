@@ -319,7 +319,41 @@ object ScriptRepo {
             });
 
             // ==========================================
-            // 7. 数据变更自动同步（永久监听）
+            // 7. 节目单时区修正 (强制对齐北京时间)
+            // ==========================================
+            let _lastTzFixTs = 0;
+            addTask('timezoneFix', () => {
+                const dayTabs = document.querySelectorAll('.tv-zhan-list-week-item');
+                if (dayTabs.length === 0) return false;
+
+                const curTab = Array.from(dayTabs).find(tb => tb.classList.contains('cur'));
+
+                const now = new Date();
+                const bjTime = new Date(now.getTime() + (now.getTimezoneOffset() - (-480)) * 60000);
+                const m = (bjTime.getMonth() + 1).toString().padStart(2, '0');
+                const d = bjTime.getDate().toString().padStart(2, '0');
+                const bjDateStr = `${'$'}{m}/${'$'}{d}`;
+
+                const targetTab = Array.from(dayTabs).find(tb => tb.textContent.includes(bjDateStr));
+                if (!targetTab) return false;
+
+                if (curTab && curTab.textContent.includes(bjDateStr)) {
+                    return false;
+                }
+
+                const nowTs = Date.now();
+                if (nowTs - _lastTzFixTs < 1000) {
+                    return false;
+                }
+
+                targetTab.click();
+                _lastTzFixTs = nowTs;
+
+                return false;
+            });
+
+            // ==========================================
+            // 8. 数据变更自动同步（永久监听）
             //    换台后网站更新节目单/标题时自动重推
             // ==========================================
             addTask('dataWatcher', () => {
@@ -331,3 +365,4 @@ object ScriptRepo {
         })();
     """.trimIndent()
 }
+

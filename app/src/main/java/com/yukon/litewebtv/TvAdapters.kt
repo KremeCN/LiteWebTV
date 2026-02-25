@@ -79,7 +79,7 @@ class ProgramAdapter : RecyclerView.Adapter<ProgramAdapter.ViewHolder>() {
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val item = items[position]
-        holder.tvTime.text = item.time
+        holder.tvTime.text = item.displayTime
         holder.tvTitle.text = item.title
 
         // 高亮当前正在播出的节目
